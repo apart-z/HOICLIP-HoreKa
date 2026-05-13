@@ -7,7 +7,7 @@ set -eo pipefail
 HOICLIP_DIR="/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/HOICLIP"
 CONDA_BASE="/hkfs/home/project/hk-project-test-p0025524/uhfpp/miniforge3"
 
-MYDS_PATH="${MYDS_PATH:-${HOICLIP_DIR}/data/myds}"
+MYDS_PATH="/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/datasets/myds"
 export MYDS_PATH
 PRETRAINED="${PRETRAINED:-${HOICLIP_DIR}/params/detr-r50-pre-2branch-hico.pth}"
 OUTPUT_ROOT="/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/HOICLIP/logs"
@@ -56,7 +56,7 @@ fi
 # NCCL / CPU settings
 # =========================
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
-export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 
