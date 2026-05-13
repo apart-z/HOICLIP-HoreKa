@@ -208,6 +208,10 @@ def get_args_parser():
     # zero shot enhancement
     parser.add_argument('--training_free_enhancement_path', default='', type=str)
 
+    # checkpoint save points (optional)
+    parser.add_argument('--save_points', nargs='*', default=[], type=int,
+                        help='extra epochs to snapshot best checkpoint before this epoch')
+
     return parser
 
 
@@ -530,7 +534,7 @@ def main(args):
 
             best_performance = performance
 
-            if epoch in args.save_points and utils.is_main_process():
+            if epoch in getattr(args, 'save_points', []) and utils.is_main_process():
                 checkpoint_path = os.path.join(output_dir, f'best_before_epoch_{epoch}.pth')
                 print('achieve save point')
                 if os.path.exists(os.path.join(output_dir, 'checkpoint_best.pth')):
