@@ -12,6 +12,7 @@ import torch
 import util.misc as utils
 from datasets.datasets_gen.hico_eval_triplet import HICOEvaluator as HICOEvaluator_gen
 from datasets.datasets_gen.vcoco_eval import VCOCOEvaluator as VCOCOEvaluator_gen
+from datasets.myds_eval_rlipv2 import MyDatasetEvaluator
 import json
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -285,6 +286,8 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
         if args.dataset_root == 'GEN':
             evaluator = VCOCOEvaluator_gen(preds, gts, data_loader.dataset.correct_mat,
                                            use_nms_filter=args.use_nms_filter)
+    elif dataset_file == 'myds':
+        evaluator = MyDatasetEvaluator(preds, gts, subject_category_id=subject_category_id, args=args)
     else:
         raise NotImplementedError
     start_time = time.time()

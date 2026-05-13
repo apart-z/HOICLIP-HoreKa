@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from pathlib import Path
 
 from util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
@@ -10,6 +11,7 @@ import numpy as np
 from ModifiedCLIP import clip
 from datasets.hico_text_label import hico_text_label, hico_obj_text_label, hico_unseen_index
 from datasets.vcoco_text_label import vcoco_hoi_text_label, vcoco_obj_text_label
+from datasets.myds_text_label import build_myds_text_label_dicts
 from datasets.static_hico import HOI_IDX_TO_ACT_IDX
 
 from ..backbone import build_backbone
@@ -53,6 +55,9 @@ class HOICLIP(nn.Module):
             hoi_text_label = vcoco_hoi_text_label
             obj_text_label = vcoco_obj_text_label
             unseen_index = None
+        elif self.args.dataset_file == 'myds':
+            hoi_text_label, obj_text_label, self.myds_meta = build_myds_text_label_dicts(self.args.hoi_path)
+            unseen_index = None
 
         clip_label, obj_clip_label, v_linear_proj_weight, hoi_text, obj_text, train_clip_label = \
             self.init_classifier_with_CLIP(hoi_text_label, obj_text_label, unseen_index, args.no_clip_cls_init)
@@ -80,7 +85,7 @@ class HOICLIP(nn.Module):
             self.verb_projection = nn.Linear(args.clip_embed_dim, 117, bias=False)
             self.verb_projection.weight.data = torch.load(args.verb_pth, map_location='cpu')
             self.verb_weight = args.verb_weight
-        else:
+        elif self.args.dataset_file == 'vcoco':
             verb2hoi_proj = torch.zeros(29, 263)
             for i in vcoco_hoi_text_label.keys():
                 verb2hoi_proj[i[0]][i[1]] = 1
@@ -88,6 +93,17 @@ class HOICLIP(nn.Module):
             self.verb2hoi_proj = nn.Parameter(verb2hoi_proj, requires_grad=False)
             self.verb_projection = nn.Linear(args.clip_embed_dim, 29, bias=False)
             self.verb_projection.weight.data = torch.load(args.verb_pth, map_location='cpu')
+            self.verb_weight = args.verb_weight
+        else:
+            num_verbs = len(self.myds_meta['verbs'])
+            num_hois = len(self.myds_meta['hoi_pairs'])
+            verb2hoi_proj = torch.zeros(num_verbs, num_hois)
+            for (verb, obj), hoi_id in self.myds_meta['hoi2id'].items():
+                verb2hoi_proj[self.myds_meta['verb2id'][verb]][hoi_id] = 1
+            self.verb2hoi_proj = nn.Parameter(verb2hoi_proj, requires_grad=False)
+            self.verb_projection = nn.Linear(args.clip_embed_dim, num_verbs, bias=False)
+            if args.verb_pth and Path(args.verb_pth).exists():
+                self.verb_projection.weight.data = torch.load(args.verb_pth, map_location='cpu')
             self.verb_weight = args.verb_weight
 
         if args.with_clip_label:
