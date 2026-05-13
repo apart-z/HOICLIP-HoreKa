@@ -562,8 +562,10 @@ class PostProcessHOITriplet(nn.Module):
 
             ids = torch.arange(b.shape[0])
 
-            results[-1].update({'hoi_scores': hs.to('cpu'), 'obj_scores': os.to('cpu'), 'clip_visual': clip_visual[index].to('cpu'),
-                                'sub_ids': ids[:ids.shape[0] // 2], 'obj_ids': ids[ids.shape[0] // 2:], 'clip_logits': clip_logits[index].to('cpu')})
+            results[-1].update({'hoi_scores': hs.to('cpu'), 'verb_scores': hs.to('cpu'),
+                                'obj_scores': os.to('cpu'), 'clip_visual': clip_visual[index].to('cpu'),
+                                'sub_ids': ids[:ids.shape[0] // 2], 'obj_ids': ids[ids.shape[0] // 2:],
+                                'clip_logits': clip_logits[index].to('cpu')})
 
         return results
 

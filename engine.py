@@ -248,7 +248,11 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
 
                     # update logits
                     for i in range(len(test_pred)):
-                        test_pred[i]['hoi_scores'] += clip_hoi_score[i].sigmoid() * co
+                        delta = clip_hoi_score[i].sigmoid() * co
+                        test_pred[i]['hoi_scores'] += delta
+                        # Keep alias field consistent for evaluators that consume `verb_scores`.
+                        if 'verb_scores' in test_pred[i]:
+                            test_pred[i]['verb_scores'] += delta
                     # testing
                     if dataset_file == 'hico':
                         evaluator = HICOEvaluator_gen(test_pred, gts, data_loader.dataset.rare_triplets,
