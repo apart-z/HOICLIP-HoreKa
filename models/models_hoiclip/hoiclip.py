@@ -316,11 +316,21 @@ class SetCriterionHOI(nn.Module):
 
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t['obj_labels'][J] for t, (_, J) in zip(targets, indices)])
-        target_classes = torch.full(src_logits.shape[:2], self.num_obj_classes,
+        bg_class = src_logits.shape[-1] - 1
+        target_classes = torch.full(src_logits.shape[:2], bg_class,
                                     dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
 
-        loss_obj_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
+        # NOTE: some datasets load object text/classes from annotation files, which can make
+        # the classifier output dimension differ from args.num_obj_classes (+ background).
+        # Cross entropy requires the weight length to exactly match the number of classes.
+        if self.empty_weight.numel() != src_logits.shape[-1]:
+            empty_weight = torch.ones(src_logits.shape[-1], device=src_logits.device, dtype=src_logits.dtype)
+            empty_weight[-1] = self.eos_coef
+        else:
+            empty_weight = self.empty_weight.to(device=src_logits.device, dtype=src_logits.dtype)
+
+        loss_obj_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, empty_weight)
         losses = {'loss_obj_ce': loss_obj_ce}
 
         if log:
@@ -552,8 +562,10 @@ class PostProcessHOITriplet(nn.Module):
 
             ids = torch.arange(b.shape[0])
 
-            results[-1].update({'hoi_scores': hs.to('cpu'), 'obj_scores': os.to('cpu'), 'clip_visual': clip_visual[index].to('cpu'),
-                                'sub_ids': ids[:ids.shape[0] // 2], 'obj_ids': ids[ids.shape[0] // 2:], 'clip_logits': clip_logits[index].to('cpu')})
+            results[-1].update({'hoi_scores': hs.to('cpu'), 'verb_scores': hs.to('cpu'),
+                                'obj_scores': os.to('cpu'), 'clip_visual': clip_visual[index].to('cpu'),
+                                'sub_ids': ids[:ids.shape[0] // 2], 'obj_ids': ids[ids.shape[0] // 2:],
+                                'clip_logits': clip_logits[index].to('cpu')})
 
         return results
 
