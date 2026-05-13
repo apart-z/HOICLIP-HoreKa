@@ -34,7 +34,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     else:
         metric_logger.add_meter('obj_class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 100
+    print_freq = 500
 
     if enable_amp:
         print('\nEnable half precision training\n')
@@ -172,7 +172,7 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
     gts = []
     counter = 0
 
-    for samples, targets in metric_logger.log_every(data_loader, 10, header):
+    for samples, targets in metric_logger.log_every(data_loader, 300, header):
         samples = samples.to(device)
         clip_img = torch.stack([v['clip_inputs'] for v in targets]).to(device)
 

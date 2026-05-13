@@ -17,6 +17,7 @@ wandb/
 *.pickle
 *.npy
 *.npz
+*.json
 
 .DS_Store
 .vscode/
