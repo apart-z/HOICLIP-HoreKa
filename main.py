@@ -125,6 +125,9 @@ def get_args_parser():
     parser.add_argument('--coco_panoptic_path', type=str)
     parser.add_argument('--remove_difficult', action='store_true')
     parser.add_argument('--hoi_path', type=str)
+    parser.add_argument('--myds_train_anno', default='', type=str)
+    parser.add_argument('--myds_val_anno', default='', type=str)
+    parser.add_argument('--myds_test_anno', default='', type=str)
 
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
@@ -424,7 +427,21 @@ def main(args):
 
     elif args.pretrained:
         checkpoint = torch.load(args.pretrained, map_location='cpu')
-        if args.eval:
+        if args.dataset_file == 'myds':
+            model_state = model_without_ddp.state_dict()
+            load_state = checkpoint['model']
+            filtered = {}
+            skipped = []
+            for k, v in load_state.items():
+                if k in model_state and model_state[k].shape == v.shape:
+                    filtered[k] = v
+                else:
+                    skipped.append(k)
+            print(f'[myds] loading pretrained with shape filter: kept={len(filtered)} skipped={len(skipped)}')
+            if skipped:
+                print('[myds] skipped keys:', skipped[:80])
+            model_without_ddp.load_state_dict(filtered, strict=False)
+        elif args.eval:
             model_without_ddp.load_state_dict(checkpoint['model'], strict=True)
         else:
             model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
@@ -472,6 +489,8 @@ def main(args):
                 performance = test_stats['mAP_all']
             elif args.dataset_file == 'hoia':
                 performance = test_stats['mAP']
+            elif args.dataset_file == 'myds':
+                performance = test_stats.get('triplet_mAP', test_stats.get('mAP_triplet_full', 0))
             best_performance = performance
         except:
             best_performance = 0
@@ -513,6 +532,8 @@ def main(args):
             performance = test_stats['mAP_all']
         elif args.dataset_file == 'hoia':
             performance = test_stats['mAP']
+        elif args.dataset_file == 'myds':
+            performance = test_stats.get('triplet_mAP', test_stats.get('mAP_triplet_full', 0))
 
         if performance > best_performance:
             checkpoint_path = os.path.join(output_dir, 'checkpoint_best.pth')
