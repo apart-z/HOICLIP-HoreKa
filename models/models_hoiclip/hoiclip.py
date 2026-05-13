@@ -103,7 +103,14 @@ class HOICLIP(nn.Module):
             self.verb2hoi_proj = nn.Parameter(verb2hoi_proj, requires_grad=False)
             self.verb_projection = nn.Linear(args.clip_embed_dim, num_verbs, bias=False)
             if args.verb_pth and Path(args.verb_pth).exists():
-                self.verb_projection.weight.data = torch.load(args.verb_pth, map_location='cpu')
+                verb_weight = torch.load(args.verb_pth, map_location='cpu')
+                if tuple(verb_weight.shape) == tuple(self.verb_projection.weight.shape):
+                    self.verb_projection.weight.data = verb_weight
+                else:
+                    print(
+                        f"[WARN] Skip loading verb_pth={args.verb_pth}: "
+                        f"shape {tuple(verb_weight.shape)} != expected {tuple(self.verb_projection.weight.shape)}"
+                    )
             self.verb_weight = args.verb_weight
 
         if args.with_clip_label:

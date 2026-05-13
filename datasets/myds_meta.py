@@ -2,6 +2,8 @@ from pathlib import Path
 import json
 import numpy as np
 
+_DEFAULT_VERB_ROLES_PATH = Path("/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/datasets/myds/metadata/verb_roles.txt")
+_DEFAULT_OBJECTS_PATH = Path("/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/datasets/myds/metadata/objects.txt")
 
 def _read_lines(path: Path):
     with open(path, 'r', encoding='utf-8') as f:
@@ -66,13 +68,27 @@ def load_myds_meta(hoi_path):
         raise FileNotFoundError(f'missing metadata directory: {meta_dir}')
 
     obj_path = meta_dir / 'objects.txt'
+    if not obj_path.exists() and _DEFAULT_OBJECTS_PATH.exists():
+        obj_path = _DEFAULT_OBJECTS_PATH
     if not obj_path.exists():
         raise FileNotFoundError(f'missing metadata file: {obj_path}')
     objects = [x.lower().strip() for x in _read_lines(obj_path)]
     if 'person' not in objects:
         raise ValueError('objects.txt must contain category "person"')
-
-    verbs = load_or_build_base_verbs(meta_dir)
+    if (meta_dir / 'base_verbs.txt').exists() or (meta_dir / 'verb_roles.txt').exists():
+        verbs = load_or_build_base_verbs(meta_dir)
+    elif _DEFAULT_VERB_ROLES_PATH.exists():
+        seen, verbs = set(), []
+        for tok in _read_lines(_DEFAULT_VERB_ROLES_PATH):
+            v, _ = normalize_verb_token(tok)
+            if v and v not in seen:
+                seen.add(v)
+                verbs.append(v)
+    else:
+        raise FileNotFoundError(
+            f'missing metadata file: {meta_dir / "base_verbs.txt"} and fallback '
+            f'{meta_dir / "verb_roles.txt"} and default {_DEFAULT_VERB_ROLES_PATH}'
+        )
     hoi_pairs = load_or_build_hoi_classes(hoi_path, objects, verbs)
 
     hoi_text_path = meta_dir / 'hoi_text_labels.txt'
