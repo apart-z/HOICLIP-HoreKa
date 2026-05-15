@@ -27,7 +27,11 @@ MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29531}"
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
+# Conda activate scripts may reference unset vars (e.g. MKL_INTERFACE_LAYER),
+# which conflicts with `set -u`. Temporarily relax nounset only for activation.
+set +u
 conda activate hoiclip
+set -u
 
 cd "${HOICLIP_DIR}"
 mkdir -p "${OUTPUT_DIR}" tmp
