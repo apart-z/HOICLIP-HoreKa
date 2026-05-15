@@ -784,6 +784,7 @@ class MyDatasetEvaluator:
     """
 
     def __init__(self, preds, gts, subject_category_id=None, args=None):
+        t0_ctor = time.time()
         # ---------------- Basic config ----------------
         self.overlap_iou = float(getattr(args, "iou_thresh", 0.5)) if args is not None else 0.5
         self.subject_category_id = subject_category_id
@@ -867,13 +868,21 @@ class MyDatasetEvaluator:
 
         # Build internal structures from raw preds & gts
         self._build_from_preds_gts(preds, gts)
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator::__init__] _build_from_preds_gts took {time.time() - t0_ctor:.3f}s")
 
         # Optional: triplet NMS per image
         if self.use_nms_filter:
+            t_nms = time.time()
             self.preds = [self.triplet_nms_filter_single(p) for p in self.preds]
+            if self.eval_debug and _is_main_process():
+                print(f"[EvalDebug][MyDatasetEvaluator::__init__] triplet_nms_filter_single(all images) took {time.time() - t_nms:.3f}s")
 
         # Build rare/non-rare sets (projected to eval triplets)
+        t_rare = time.time()
         self.rare_triplets, self.nonrare_triplets = self._build_rare_nonrare_sets(eval_gts_raw=gts)
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator::__init__] _build_rare_nonrare_sets took {time.time() - t_rare:.3f}s")
 
         total_gts = sum(self.sum_gts.values())
         if _is_main_process():
@@ -885,6 +894,8 @@ class MyDatasetEvaluator:
                 f"rare_triplets={len(self.rare_triplets)}, nonrare_triplets={len(self.nonrare_triplets)}, "
                 f"max_hois={self.max_hois}, group_max_hois={self.group_max_hois}"
             )
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator::__init__] total ctor time {time.time() - t0_ctor:.3f}s")
 
     # ------------------------------------------------------------------
     # Normalizers / helpers

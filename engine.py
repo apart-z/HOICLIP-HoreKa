@@ -310,7 +310,10 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
             evaluator = VCOCOEvaluator_gen(preds, gts, data_loader.dataset.correct_mat,
                                            use_nms_filter=args.use_nms_filter)
     elif dataset_file == 'myds':
+        t_eval_ctor = time.time()
         evaluator = MyDatasetEvaluator(preds, gts, subject_category_id=subject_category_id, args=args)
+        if eval_debug and utils.is_main_process():
+            print(f"[EvalDebug] MyDatasetEvaluator(...) ctor finished in {time.time() - t_eval_ctor:.3f}s")
     else:
         raise NotImplementedError
     if eval_debug and utils.is_main_process():
