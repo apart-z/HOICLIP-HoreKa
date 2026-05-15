@@ -14,6 +14,7 @@ set -euo pipefail
 HOICLIP_DIR="${HOICLIP_DIR:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/HOICLIP}"
 CONDA_BASE="${CONDA_BASE:-/hkfs/home/project/hk-project-test-p0025524/uhfpp/miniforge3}"
 MYDS_PATH="${MYDS_PATH:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/datasets/myds}"
+export MYDS_PATH
 
 CKPT_PATH="${CKPT_PATH:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/HOICLIP/logs/myds_2node_8gpu_bs4_20260513_213720/checkpoint_last.pth}"
 OUTPUT_DIR="${OUTPUT_DIR:-${HOICLIP_DIR}/logs/eval_myds_$(date +%Y%m%d_%H%M%S)}"
@@ -48,6 +49,11 @@ meta = load_myds_meta(os.environ['MYDS_PATH'])
 print(len(meta['objects']), len(meta['verbs']))
 PY
 )"
+
+if [[ -z "${NUM_OBJ_CLASSES}" || -z "${NUM_VERB_CLASSES}" ]]; then
+  echo "[ERROR] failed to infer NUM_OBJ_CLASSES/NUM_VERB_CLASSES from MYDS_PATH=${MYDS_PATH}"
+  exit 1
+fi
 
 if [[ "${EVAL_SPLIT}" == "test" ]]; then
   LOG_SENTINEL="Test result:"
