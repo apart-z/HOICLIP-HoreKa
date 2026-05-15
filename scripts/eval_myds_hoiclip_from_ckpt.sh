@@ -27,6 +27,8 @@ MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "${SLURM_JOB_NODELIST:-}" 
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 MASTER_PORT="${MASTER_PORT:-29531}"
 ENABLE_GROUP_EVAL="${ENABLE_GROUP_EVAL:-0}"
+EVAL_DEBUG="${EVAL_DEBUG:-0}"
+ENABLE_ROLE_PRIOR_EVAL="${ENABLE_ROLE_PRIOR_EVAL:-0}"
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 # Conda activate scripts may reference unset vars (e.g. MKL_INTERFACE_LAYER),
@@ -64,6 +66,13 @@ fi
 GROUP_EVAL_ARGS=()
 if [[ "${ENABLE_GROUP_EVAL}" == "1" ]]; then
   GROUP_EVAL_ARGS+=(--enable_group_eval)
+fi
+DEBUG_ARGS=()
+if [[ "${EVAL_DEBUG}" == "1" ]]; then
+  DEBUG_ARGS+=(--eval_debug)
+fi
+if [[ "${ENABLE_ROLE_PRIOR_EVAL}" == "1" ]]; then
+  DEBUG_ARGS+=(--enable_role_prior_eval)
 fi
 
 LAUNCHER=(python main.py)
@@ -107,6 +116,7 @@ fi
   --output_dir "${OUTPUT_DIR}" \
   --verb_pth ./tmp/verb.pth \
   "${GROUP_EVAL_ARGS[@]}" \
+  "${DEBUG_ARGS[@]}" \
   2>&1 | tee "${OUTPUT_DIR}/eval.log"
 
 echo "[INFO] Eval finished. Log: ${OUTPUT_DIR}/eval.log"

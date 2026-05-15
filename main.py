@@ -189,6 +189,10 @@ def get_args_parser():
     parser.add_argument('--eval_location', action='store_true', help='')
     parser.add_argument('--enable_group_eval', action='store_true',
                         help='enable expensive higher-order group HOI metrics during MYDS evaluation')
+    parser.add_argument('--eval_debug', action='store_true',
+                        help='enable verbose timing/debug logs for evaluation pipeline')
+    parser.add_argument('--enable_role_prior_eval', action='store_true',
+                        help='enable expensive role-aware prior metrics during MYDS evaluation')
     # DAB
     parser.add_argument('--enable_cp', action='store_true',
                         help="use checkpoint to save memory")
