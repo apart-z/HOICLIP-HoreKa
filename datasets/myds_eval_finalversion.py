@@ -21,6 +21,7 @@ This file is intended to be imported and used during RLIPv2 training/eval.
 import os
 import json
 import math
+import time
 from collections import defaultdict
 from typing import Any, Dict, List, Tuple, Optional, Set
 
@@ -123,9 +124,9 @@ class GroupHOIMetrics:
     def __init__(self, args, overlap_iou: float, norm_cat_fn):
         self.overlap_iou = overlap_iou
         self._norm_cat = norm_cat_fn
-        # Default-on for custom HOI eval to avoid silent all-zero group metrics
-        # when flag is forgotten in training scripts.
-        self.enabled = bool(getattr(args, "enable_group_eval", True)) if args is not None else True
+        # Group metrics are significantly more expensive than triplet/pair/action mAP.
+        # Keep disabled by default unless explicitly requested.
+        self.enabled = bool(getattr(args, "enable_group_eval", False)) if args is not None else False
         self.soft_match_thresh = float(getattr(args, "group_soft_match_thresh", 0.5)) if args is not None else 0.5
         self.duplicate_iou = float(getattr(args, "group_duplicate_iou", 0.85)) if args is not None else 0.85
         self.group_build_mode = str(getattr(args, "group_build_mode", "heuristic_graph")) if args is not None else "heuristic_graph"
@@ -807,6 +808,8 @@ class MyDatasetEvaluator:
 
         # Rare/non-rare split params (triplet-level, computed from TRAIN frequency)
         self.eval_train_json = getattr(args, "eval_train_json", None) if args is not None else None
+        self.eval_debug = bool(getattr(args, "eval_debug", False)) if args is not None else False
+        self.enable_role_prior_eval = bool(getattr(args, "enable_role_prior_eval", False)) if args is not None else False
         self.rare_thresh = int(getattr(args, "eval_rare_thresh", 10)) if args is not None else 10
         self.bbox_format = getattr(args, "eval_bbox_format", "xyxy") if args is not None else "xyxy"
 
@@ -2207,8 +2210,11 @@ class MyDatasetEvaluator:
     # ------------------------------------------------------------------
 
     def evaluate(self) -> Dict[str, float]:
+        t_eval_all = time.time()
         self._print_non_contact_debug_summary()
         self._print_non_contact_debug_samples()
+        if self.eval_debug and _is_main_process():
+            print("[EvalDebug][MyDatasetEvaluator] start image-wise TP/FP accumulation")
         # accumulate TP/FP for every image
         for img_preds, img_gts in zip(self.preds, self.gts):
             pred_bboxes = img_preds["predictions"]
@@ -2288,6 +2294,8 @@ class MyDatasetEvaluator:
                 # - If no GT, we do not count FP for unseen keys beyond eval space.
                 # - If no preds, nothing to accumulate.
 
+        if self.eval_debug and _is_main_process():
+            print("[EvalDebug][MyDatasetEvaluator] done accumulation, start AP summaries")
         # ---------------- Triplet Full / Rare / Non-rare ----------------
         full = self.compute_map_triplet(self.gt_triplets)
         rare_list = [t for t in self.gt_triplets if t in self.rare_triplets]
@@ -2309,7 +2317,10 @@ class MyDatasetEvaluator:
             print(f"Triplet Rare     mAP: {rare['mAP']:.4f}  mean max recall: {rare['mean max recall']:.4f}")
             print(f"Triplet Non-Rare mAP: {nonrare['mAP']:.4f}  mean max recall: {nonrare['mean max recall']:.4f}")
 
+        t_group = time.time()
         group_out = self.group_evaluator.evaluate(self.preds, self.gts)
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator] group_evaluator.evaluate() took {time.time()-t_group:.3f}s")
         if _is_main_process() and (not isinstance(group_out, dict) or len(group_out) == 0):
             print("[MyDatasetEvaluator] Group evaluator returned empty output (likely disabled). "
                   "Set --enable_group_eval to force group metric computation.")
@@ -2348,7 +2359,18 @@ class MyDatasetEvaluator:
             "triplet_rare_mAP": rare['mAP'], "triplet_rare_mean max recall": rare['mean max recall'],
             "triplet_non_rare_mAP": nonrare['mAP'], "triplet_non_rare_mean max recall": nonrare['mean max recall'],
         }
-        role_stats = self._compute_role_metrics_prior()
+        if self.enable_role_prior_eval:
+            t_role = time.time()
+            role_stats = self._compute_role_metrics_prior()
+            if self.eval_debug and _is_main_process():
+                print(f"[EvalDebug][MyDatasetEvaluator] _compute_role_metrics_prior() took {time.time()-t_role:.3f}s")
+        else:
+            role_stats = {
+                'role_mAP_vro_prior': 0.0, 'role_AP_target_prior': 0.0, 'role_AP_instrument_prior': 0.0,
+                'role_AP_support_prior': 0.0, 'role_AP_location_prior': 0.0, 'role_HRER_prior': 0.0,
+                'role_NIC_FPR': 0.0, 'role_GT_target': 0.0, 'role_GT_instrument': 0.0,
+                'role_GT_support': 0.0, 'role_GT_location': 0.0, 'role_RB_mAP_prior': 0.0
+            }
         stats.update(role_stats)
         if _is_main_process():
             print("[RoleAwarePriorMetrics]")
@@ -2366,6 +2388,8 @@ class MyDatasetEvaluator:
                 f"role_HRER_prior: {role_stats.get('role_HRER_prior', 0.0):.4f}  "
                 f"role_NIC_FPR: {role_stats.get('role_NIC_FPR', 0.0):.4f}"
             )
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator] total evaluate() time {time.time()-t_eval_all:.3f}s")
             print(
                 f"role_GT_target: {int(role_stats.get('role_GT_target', 0.0))}  "
                 f"role_GT_instrument: {int(role_stats.get('role_GT_instrument', 0.0))}  "
