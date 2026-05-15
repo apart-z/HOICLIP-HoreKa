@@ -12,7 +12,7 @@ import torch
 import util.misc as utils
 from datasets.datasets_gen.hico_eval_triplet import HICOEvaluator as HICOEvaluator_gen
 from datasets.datasets_gen.vcoco_eval import VCOCOEvaluator as VCOCOEvaluator_gen
-from datasets.myds_eval_rlipv2 import MyDatasetEvaluator
+from datasets.myds_eval_finalversion import MyDatasetEvaluator
 import json
 import torch.nn.functional as F
 from tqdm import tqdm

@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Evaluate a trained MYDS checkpoint with HOICLIP.
+# Metrics are computed by datasets/myds_eval_finalversion.py (wired in engine.py).
+# Built-in defaults mirror:
+#   EVAL_SPLIT=test
+#   NNODES=2
+#   NPROC_PER_NODE=1
+#   NODE_RANK=${SLURM_NODEID}
+#   MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+#   MASTER_PORT=29531
+
+HOICLIP_DIR="${HOICLIP_DIR:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/HOICLIP}"
+CONDA_BASE="${CONDA_BASE:-/hkfs/home/project/hk-project-test-p0025524/uhfpp/miniforge3}"
+MYDS_PATH="${MYDS_PATH:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/datasets/myds}"
+
+CKPT_PATH="${CKPT_PATH:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_data-1773972484/HOICLIP/logs/myds_2node_8gpu_bs4_20260513_213720/checkpoint_last.pth}"
+OUTPUT_DIR="${OUTPUT_DIR:-${HOICLIP_DIR}/logs/eval_myds_$(date +%Y%m%d_%H%M%S)}"
+PRETRAINED="${PRETRAINED:-${HOICLIP_DIR}/params/detr-r50-pre-2branch-hico.pth}"
+EVAL_SPLIT="${EVAL_SPLIT:-test}"   # one of: both|test|val
+NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
+NNODES="${NNODES:-${SLURM_NNODES:-2}}"
+NODE_RANK="${NODE_RANK:-${SLURM_NODEID:-0}}"
+MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "${SLURM_JOB_NODELIST:-}" 2>/dev/null | head -n1)}"
+MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
+MASTER_PORT="${MASTER_PORT:-29531}"
+
+source "${CONDA_BASE}/etc/profile.d/conda.sh"
+conda activate hoiclip
+
+cd "${HOICLIP_DIR}"
+mkdir -p "${OUTPUT_DIR}" tmp
+
+if [[ ! -f "${CKPT_PATH}" ]]; then
+  echo "[ERROR] checkpoint not found: ${CKPT_PATH}"
+  exit 1
+fi
+
+read -r NUM_OBJ_CLASSES NUM_VERB_CLASSES <<<"$(python - <<'PY'
+from datasets.myds_meta import load_myds_meta
+import os
+meta = load_myds_meta(os.environ['MYDS_PATH'])
+print(len(meta['objects']), len(meta['verbs']))
+PY
+)"
+
+if [[ "${EVAL_SPLIT}" == "test" ]]; then
+  LOG_SENTINEL="Test result:"
+elif [[ "${EVAL_SPLIT}" == "val" ]]; then
+  LOG_SENTINEL="Val result:"
+elif [[ "${EVAL_SPLIT}" == "both" ]]; then
+  LOG_SENTINEL=""
+else
+  echo "[ERROR] invalid EVAL_SPLIT=${EVAL_SPLIT}, expected one of both|test|val"
+  exit 1
+fi
+
+if [[ -n "${LOG_SENTINEL}" ]]; then
+  # main.py --eval runs both test+val when corresponding log entry is missing.
+  # Pre-seed one sentinel to force single-split eval.
+  printf '%s\n' "${LOG_SENTINEL}" > "${OUTPUT_DIR}/log.txt"
+fi
+
+LAUNCHER=(python main.py)
+if [[ "${NPROC_PER_NODE}" -gt 1 || "${NNODES}" -gt 1 ]]; then
+  LAUNCHER=(
+    python -m torch.distributed.launch
+    --nnodes "${NNODES}"
+    --node_rank "${NODE_RANK}"
+    --nproc_per_node "${NPROC_PER_NODE}"
+    --master_addr "${MASTER_ADDR}"
+    --master_port "${MASTER_PORT}"
+    --use_env
+    main.py
+  )
+fi
+
+"${LAUNCHER[@]}" \
+  --eval \
+  --dataset_file myds \
+  --hoi_path "${MYDS_PATH}" \
+  --myds_train_anno "${MYDS_PATH}/annotations/train_20k.json" \
+  --myds_val_anno "${MYDS_PATH}/annotations/val.json" \
+  --myds_test_anno "${MYDS_PATH}/annotations/test.json" \
+  --num_obj_classes "${NUM_OBJ_CLASSES}" \
+  --num_verb_classes "${NUM_VERB_CLASSES}" \
+  --backbone resnet50 \
+  --num_queries 64 \
+  --dec_layers 3 \
+  --batch_size 1 \
+  --num_workers 4 \
+  --dataset_root GEN \
+  --model_name HOICLIP \
+  --zero_shot_type default \
+  --use_nms_filter \
+  --fix_clip \
+  --with_clip_label \
+  --with_obj_clip_label \
+  --pretrained "${PRETRAINED}" \
+  --resume "${CKPT_PATH}" \
+  --output_dir "${OUTPUT_DIR}" \
+  --verb_pth ./tmp/verb.pth \
+  2>&1 | tee "${OUTPUT_DIR}/eval.log"
+
+echo "[INFO] Eval finished. Log: ${OUTPUT_DIR}/eval.log"
