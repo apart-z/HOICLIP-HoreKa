@@ -12,7 +12,7 @@ import torch
 import util.misc as utils
 from datasets.datasets_gen.hico_eval_triplet import HICOEvaluator as HICOEvaluator_gen
 from datasets.datasets_gen.vcoco_eval import VCOCOEvaluator as VCOCOEvaluator_gen
-from datasets.myds_eval_rlipv2 import MyDatasetEvaluator
+from datasets.myds_eval_finalversion import MyDatasetEvaluator
 import json
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -173,6 +173,10 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
     gts = []
     counter = 0
 
+    eval_debug = bool(getattr(args, "eval_debug", False))
+    if eval_debug:
+        print(f"[EvalDebug] rank={utils.get_rank()} world_size={utils.get_world_size()} start dataloader loop")
+
     for samples, targets in metric_logger.log_every(data_loader, 300, header):
         samples = samples.to(device)
         clip_img = torch.stack([v['clip_inputs'] for v in targets]).to(device)
@@ -181,15 +185,27 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors['hoi'](outputs, orig_target_sizes)
 
-        preds.extend(list(itertools.chain.from_iterable(utils.all_gather(results))))
+        t0 = time.time()
+        gathered_results = utils.all_gather(results)
+        if eval_debug and utils.is_main_process() and (counter % 100 == 0):
+            print(f"[EvalDebug] all_gather(results) took {time.time() - t0:.3f}s @iter={counter}")
+        preds.extend(list(itertools.chain.from_iterable(gathered_results)))
         # For avoiding a runtime error, the copy is used
-        gts.extend(list(itertools.chain.from_iterable(utils.all_gather(copy.deepcopy(targets)))))
+        t1 = time.time()
+        gathered_targets = utils.all_gather(copy.deepcopy(targets))
+        if eval_debug and utils.is_main_process() and (counter % 100 == 0):
+            print(f"[EvalDebug] all_gather(targets) took {time.time() - t1:.3f}s @iter={counter}")
+        gts.extend(list(itertools.chain.from_iterable(gathered_targets)))
 
         counter += 1
         if counter >= 20 and args.no_training:
             break
     # gather the stats from all processes
+    if eval_debug and utils.is_main_process():
+        print("[EvalDebug] entering metric_logger.synchronize_between_processes()")
     metric_logger.synchronize_between_processes()
+    if eval_debug and utils.is_main_process():
+        print("[EvalDebug] passed metric_logger.synchronize_between_processes()")
 
     img_ids = [img_gts['id'] for img_gts in gts]
     _, indices = np.unique(img_ids, return_index=True)
@@ -281,6 +297,9 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
                             print(log)
                             f.write(log)
 
+    if eval_debug and utils.is_main_process():
+        print(f"[EvalDebug] after dedup: preds={len(preds)} gts={len(gts)} dataset={dataset_file}")
+
     if dataset_file == 'hico':
         if args.dataset_root == 'GEN':
             evaluator = HICOEvaluator_gen(preds, gts, data_loader.dataset.rare_triplets,
@@ -291,12 +310,19 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader,
             evaluator = VCOCOEvaluator_gen(preds, gts, data_loader.dataset.correct_mat,
                                            use_nms_filter=args.use_nms_filter)
     elif dataset_file == 'myds':
+        t_eval_ctor = time.time()
         evaluator = MyDatasetEvaluator(preds, gts, subject_category_id=subject_category_id, args=args)
+        if eval_debug and utils.is_main_process():
+            print(f"[EvalDebug] MyDatasetEvaluator(...) ctor finished in {time.time() - t_eval_ctor:.3f}s")
     else:
         raise NotImplementedError
+    if eval_debug and utils.is_main_process():
+        print(f"[EvalDebug] entering evaluator.evaluate(): {evaluator.__class__.__name__}")
     start_time = time.time()
     stats = evaluator.evaluate()
     total_time = time.time() - start_time
+    if eval_debug and utils.is_main_process():
+        print(f"[EvalDebug] evaluator.evaluate() finished in {total_time:.3f}s")
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Total time computing mAP: {}'.format(total_time_str))
 
