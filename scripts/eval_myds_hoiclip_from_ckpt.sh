@@ -25,7 +25,15 @@ NNODES="${NNODES:-2}"
 NODE_RANK="${NODE_RANK:-${SLURM_NODEID:-0}}"
 MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "${SLURM_JOB_NODELIST:-}" 2>/dev/null | head -n1)}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
-MASTER_PORT="${MASTER_PORT:-29531}"
+# Avoid port collisions across concurrent jobs. If user does not set MASTER_PORT,
+# derive one from SLURM_JOB_ID (same pattern as training script).
+if [[ -z "${MASTER_PORT:-}" ]]; then
+  if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    MASTER_PORT="$((10000 + SLURM_JOB_ID % 50000))"
+  else
+    MASTER_PORT="29531"
+  fi
+fi
 ENABLE_GROUP_EVAL="${ENABLE_GROUP_EVAL:-0}"
 EVAL_DEBUG="${EVAL_DEBUG:-0}"
 ENABLE_ROLE_PRIOR_EVAL="${ENABLE_ROLE_PRIOR_EVAL:-0}"
@@ -62,6 +70,7 @@ if [[ "${EVAL_SPLIT}" != "test" && "${EVAL_SPLIT}" != "val" && "${EVAL_SPLIT}" !
   echo "[ERROR] invalid EVAL_SPLIT=${EVAL_SPLIT}, expected one of both|test|val"
   exit 1
 fi
+echo "[INFO] Distributed launch config: NNODES=${NNODES} NPROC_PER_NODE=${NPROC_PER_NODE} NODE_RANK=${NODE_RANK} MASTER_ADDR=${MASTER_ADDR} MASTER_PORT=${MASTER_PORT}"
 
 GROUP_EVAL_ARGS=()
 if [[ "${ENABLE_GROUP_EVAL}" == "1" ]]; then
