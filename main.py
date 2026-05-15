@@ -3,6 +3,7 @@ import datetime
 import json
 import random
 import time
+import faulthandler
 from pathlib import Path
 import logging
 
@@ -191,6 +192,8 @@ def get_args_parser():
                         help='enable expensive higher-order group HOI metrics during MYDS evaluation')
     parser.add_argument('--eval_debug', action='store_true',
                         help='enable verbose timing/debug logs for evaluation pipeline')
+    parser.add_argument('--eval_debug_dump_secs', default=120, type=int,
+                        help='seconds between periodic faulthandler traceback dumps when --eval_debug is set')
     parser.add_argument('--enable_role_prior_eval', action='store_true',
                         help='enable expensive role-aware prior metrics during MYDS evaluation')
     # DAB
@@ -227,6 +230,10 @@ def get_args_parser():
 
 
 def main(args):
+    if getattr(args, "eval_debug", False):
+        # Periodically dump Python stack traces to help locate hangs/stalls.
+        faulthandler.enable()
+        faulthandler.dump_traceback_later(max(30, int(getattr(args, "eval_debug_dump_secs", 120))), repeat=True)
     if args.use_ddp == 1:
         utils.init_distributed_mode(args)
     else:

@@ -36,6 +36,7 @@ if [[ -z "${MASTER_PORT:-}" ]]; then
 fi
 ENABLE_GROUP_EVAL="${ENABLE_GROUP_EVAL:-0}"
 EVAL_DEBUG="${EVAL_DEBUG:-0}"
+EVAL_DEBUG_DUMP_SECS="${EVAL_DEBUG_DUMP_SECS:-120}"
 ENABLE_ROLE_PRIOR_EVAL="${ENABLE_ROLE_PRIOR_EVAL:-0}"
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
@@ -78,7 +79,7 @@ if [[ "${ENABLE_GROUP_EVAL}" == "1" ]]; then
 fi
 DEBUG_ARGS=()
 if [[ "${EVAL_DEBUG}" == "1" ]]; then
-  DEBUG_ARGS+=(--eval_debug)
+  DEBUG_ARGS+=(--eval_debug --eval_debug_dump_secs "${EVAL_DEBUG_DUMP_SECS}")
 fi
 if [[ "${ENABLE_ROLE_PRIOR_EVAL}" == "1" ]]; then
   DEBUG_ARGS+=(--enable_role_prior_eval)
