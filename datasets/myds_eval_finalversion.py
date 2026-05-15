@@ -123,9 +123,9 @@ class GroupHOIMetrics:
     def __init__(self, args, overlap_iou: float, norm_cat_fn):
         self.overlap_iou = overlap_iou
         self._norm_cat = norm_cat_fn
-        # Default-on for custom HOI eval to avoid silent all-zero group metrics
-        # when flag is forgotten in training scripts.
-        self.enabled = bool(getattr(args, "enable_group_eval", True)) if args is not None else True
+        # Group metrics are significantly more expensive than triplet/pair/action mAP.
+        # Keep disabled by default unless explicitly requested.
+        self.enabled = bool(getattr(args, "enable_group_eval", False)) if args is not None else False
         self.soft_match_thresh = float(getattr(args, "group_soft_match_thresh", 0.5)) if args is not None else 0.5
         self.duplicate_iou = float(getattr(args, "group_duplicate_iou", 0.85)) if args is not None else 0.85
         self.group_build_mode = str(getattr(args, "group_build_mode", "heuristic_graph")) if args is not None else "heuristic_graph"

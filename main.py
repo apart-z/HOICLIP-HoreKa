@@ -187,6 +187,8 @@ def get_args_parser():
     parser.add_argument('--dataset_root', default='GEN', help='')
     parser.add_argument('--model_name', default='GEN', help='')
     parser.add_argument('--eval_location', action='store_true', help='')
+    parser.add_argument('--enable_group_eval', action='store_true',
+                        help='enable expensive higher-order group HOI metrics during MYDS evaluation')
     # DAB
     parser.add_argument('--enable_cp', action='store_true',
                         help="use checkpoint to save memory")
