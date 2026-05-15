@@ -6,7 +6,7 @@ set -euo pipefail
 # Built-in defaults mirror:
 #   EVAL_SPLIT=test
 #   NNODES=2
-#   NPROC_PER_NODE=1
+#   NPROC_PER_NODE=4
 #   NODE_RANK=${SLURM_NODEID}
 #   MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 #   MASTER_PORT=29531
@@ -20,8 +20,8 @@ CKPT_PATH="${CKPT_PATH:-/hkfs/work/workspace/scratch/uhfpp-hoi_data/uhfpp-hoi_da
 OUTPUT_DIR="${OUTPUT_DIR:-${HOICLIP_DIR}/logs/eval_myds_$(date +%Y%m%d_%H%M%S)}"
 PRETRAINED="${PRETRAINED:-${HOICLIP_DIR}/params/detr-r50-pre-2branch-hico.pth}"
 EVAL_SPLIT="${EVAL_SPLIT:-test}"   # one of: both|test|val
-NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
-NNODES="${NNODES:-${SLURM_NNODES:-2}}"
+NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
+NNODES="${NNODES:-2}"
 NODE_RANK="${NODE_RANK:-${SLURM_NODEID:-0}}"
 MASTER_ADDR="${MASTER_ADDR:-$(scontrol show hostnames "${SLURM_JOB_NODELIST:-}" 2>/dev/null | head -n1)}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
@@ -55,21 +55,9 @@ if [[ -z "${NUM_OBJ_CLASSES}" || -z "${NUM_VERB_CLASSES}" ]]; then
   exit 1
 fi
 
-if [[ "${EVAL_SPLIT}" == "test" ]]; then
-  LOG_SENTINEL="Test result:"
-elif [[ "${EVAL_SPLIT}" == "val" ]]; then
-  LOG_SENTINEL="Val result:"
-elif [[ "${EVAL_SPLIT}" == "both" ]]; then
-  LOG_SENTINEL=""
-else
+if [[ "${EVAL_SPLIT}" != "test" && "${EVAL_SPLIT}" != "val" && "${EVAL_SPLIT}" != "both" ]]; then
   echo "[ERROR] invalid EVAL_SPLIT=${EVAL_SPLIT}, expected one of both|test|val"
   exit 1
-fi
-
-if [[ -n "${LOG_SENTINEL}" ]]; then
-  # main.py --eval runs both test+val when corresponding log entry is missing.
-  # Pre-seed one sentinel to force single-split eval.
-  printf '%s\n' "${LOG_SENTINEL}" > "${OUTPUT_DIR}/log.txt"
 fi
 
 LAUNCHER=(python main.py)
@@ -88,6 +76,7 @@ fi
 
 "${LAUNCHER[@]}" \
   --eval \
+  --eval_split "${EVAL_SPLIT}" \
   --dataset_file myds \
   --hoi_path "${MYDS_PATH}" \
   --myds_train_anno "${MYDS_PATH}/annotations/train_20k.json" \
@@ -98,7 +87,7 @@ fi
   --backbone resnet50 \
   --num_queries 64 \
   --dec_layers 3 \
-  --batch_size 1 \
+  --batch_size 4 \
   --num_workers 4 \
   --dataset_root GEN \
   --model_name HOICLIP \

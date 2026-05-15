@@ -138,6 +138,8 @@ def get_args_parser():
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--eval_split', default='both', choices=['both', 'test', 'val'],
+                        help='evaluation split when --eval is set')
     parser.add_argument('--num_workers', default=2, type=int)
 
     # distributed training parameters
@@ -378,7 +380,7 @@ def main(args):
 
     # test and val dataloader initialization
 
-    test_split = 'val'
+    test_split = 'test'
     dataset_val = build_dataset(image_set='val', args=args)
     dataset_test = build_dataset(image_set=test_split, args=args)
     if args.distributed:
@@ -453,7 +455,10 @@ def main(args):
         with open(output_dir / "log.txt", 'r') as f:
             previous_log = f.read()
 
-        if 'Test result:' not in previous_log:
+        run_test = args.eval_split in ('both', 'test')
+        run_val = args.eval_split in ('both', 'val')
+
+        if run_test and 'Test result:' not in previous_log:
             print('Evaluating in test split!')
             test_stats = evaluate_hoi(args.dataset_file, model, postprocessors, data_loader_test,
                                       args.subject_category_id, device, args)
@@ -464,7 +469,7 @@ def main(args):
                     f.write('Test result:' + json.dumps(test_stats) + "\n")
                 LOGGER.info('Epoch Test: [{}] '.format('eval') + json.dumps(test_stats))
 
-        if 'Val result:' not in previous_log:
+        if run_val and 'Val result:' not in previous_log:
             print('Evaluating in val split!')
             test_stats = evaluate_hoi(args.dataset_file, model, postprocessors, data_loader_val,
                                       args.subject_category_id, device, args)
