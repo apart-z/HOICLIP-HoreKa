@@ -87,7 +87,7 @@ fi
   --backbone resnet50 \
   --num_queries 64 \
   --dec_layers 3 \
-  --batch_size 1 \
+  --batch_size 4 \
   --num_workers 4 \
   --dataset_root GEN \
   --model_name HOICLIP \
