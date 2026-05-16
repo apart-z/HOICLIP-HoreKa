@@ -800,6 +800,12 @@ class MyDatasetEvaluator:
         self.object_id_to_category = obj_tokens
         self.max_hois = int(getattr(args, "max_hois", 100)) if args is not None else 100
         self.group_max_hois = int(getattr(args, "group_max_hois", 2000)) if args is not None else 2000
+        self.eval_topk_verbs_per_query = int(getattr(args, "eval_topk_verbs_per_query", 20)) if args is not None else 20
+        # IMPORTANT:
+        # For MYDS val/test built by datasets_gen/myds.py, actions are integer verb IDs.
+        # Keep ID-space matching by default to avoid accidental remapping through an
+        # external verb token file with different ordering.
+        self.eval_action_by_id = bool(getattr(args, "eval_action_by_id", True)) if args is not None else True
 
         # NMS
         self.use_nms_filter = bool(getattr(args, "use_nms_filter", False)) if args is not None else False
@@ -934,6 +940,17 @@ class MyDatasetEvaluator:
             return str(cat).strip()
 
     def _norm_action(self, a: Any) -> Any:
+        if self.eval_action_by_id:
+            if isinstance(a, str):
+                s = a.strip()
+                if s.isdigit():
+                    return int(s)
+                return self.normalize_action_token(s)
+            try:
+                return int(a)
+            except Exception:
+                return a
+
         if isinstance(a, str):
             s = a.strip()
             if s.isdigit():
@@ -1022,31 +1039,36 @@ class MyDatasetEvaluator:
                 pred_bboxes.append({"bbox": _as_xyxy(box, self.bbox_format), "category": _label_to_int(lbl)})
 
             num_queries, num_verbs = verb_scores.shape
-            verb_ids = np.tile(np.arange(num_verbs, dtype=np.int32), (num_queries, 1)).ravel()
-            subj_ids = np.tile(sub_ids.reshape(-1, 1), (1, num_verbs)).ravel()
-            obj_ids2 = np.tile(obj_ids.reshape(-1, 1), (1, num_verbs)).ravel()
-            scores_flat = verb_scores.ravel().astype(np.float32, copy=False)
-
-            # IMPORTANT for speed:
-            # avoid building/sorting full Q*V hypotheses for every image.
             keep_k = max(
                 int(self.max_hois) if self.max_hois > 0 else 0,
                 int(self.group_max_hois) if self.group_max_hois > 0 else 0
             )
-            if keep_k <= 0 or keep_k >= scores_flat.size:
-                top_idx = np.argsort(scores_flat)[::-1]
+
+            # Fast path: per-query top-k verbs first, then global top-k over reduced pool.
+            kq = max(1, min(int(self.eval_topk_verbs_per_query), num_verbs))
+            if kq < num_verbs:
+                local_part = np.argpartition(verb_scores, -kq, axis=1)[:, -kq:]  # [Q, kq]
             else:
-                part = np.argpartition(scores_flat, -keep_k)[-keep_k:]
-                top_idx = part[np.argsort(scores_flat[part])[::-1]]
+                local_part = np.tile(np.arange(num_verbs, dtype=np.int32), (num_queries, 1))
+
+            q_ids = np.repeat(np.arange(num_queries, dtype=np.int32), local_part.shape[1])
+            v_ids = local_part.reshape(-1).astype(np.int32, copy=False)
+            cand_scores = verb_scores[q_ids, v_ids].astype(np.float32, copy=False)
+
+            if keep_k <= 0 or keep_k >= cand_scores.size:
+                order = np.argsort(cand_scores)[::-1]
+            else:
+                part = np.argpartition(cand_scores, -keep_k)[-keep_k:]
+                order = part[np.argsort(cand_scores[part])[::-1]]
 
             pred_hois = [
                 {
-                    "subject_id": int(subj_ids[i]),
-                    "object_id": int(obj_ids2[i]),
-                    "action": int(verb_ids[i]),
-                    "score": float(scores_flat[i]),
+                    "subject_id": int(sub_ids[q_ids[i]]),
+                    "object_id": int(obj_ids[q_ids[i]]),
+                    "action": int(v_ids[i]),
+                    "score": float(cand_scores[i]),
                 }
-                for i in top_idx
+                for i in order
             ]
 
             pred_hois_for_group = pred_hois[: self.group_max_hois] if self.group_max_hois > 0 else pred_hois

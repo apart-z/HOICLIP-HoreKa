@@ -204,6 +204,13 @@ def get_args_parser():
                         help='max predicted HOIs used for group evaluator construction')
     parser.add_argument('--iou_thresh', default=0.5, type=float,
                         help='IoU threshold used in MYDS evaluator matching')
+    parser.add_argument('--eval_topk_verbs_per_query', default=20, type=int,
+                        help='top-k verbs kept per query before global HOI top-k in MYDS evaluator')
+    parser.add_argument('--eval_action_by_id', dest='eval_action_by_id', action='store_true',
+                        help='match HOI actions by integer verb IDs in MYDS evaluator (recommended)')
+    parser.add_argument('--no_eval_action_by_id', dest='eval_action_by_id', action='store_false',
+                        help='disable ID-space action matching and map IDs through token vocabulary')
+    parser.set_defaults(eval_action_by_id=True)
     # DAB
     parser.add_argument('--enable_cp', action='store_true',
                         help="use checkpoint to save memory")

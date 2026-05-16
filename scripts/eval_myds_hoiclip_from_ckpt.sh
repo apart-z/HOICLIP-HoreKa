@@ -40,6 +40,7 @@ EVAL_DEBUG_DUMP_SECS="${EVAL_DEBUG_DUMP_SECS:-120}"
 ENABLE_ROLE_PRIOR_EVAL="${ENABLE_ROLE_PRIOR_EVAL:-0}"
 USE_NMS_FILTER="${USE_NMS_FILTER:-0}"
 EVAL_MAX_HOIS="${EVAL_MAX_HOIS:-1000}"
+EVAL_TOPK_VERBS_PER_QUERY="${EVAL_TOPK_VERBS_PER_QUERY:-20}"
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 # Conda activate scripts may reference unset vars (e.g. MKL_INTERFACE_LAYER),
@@ -132,7 +133,9 @@ fi
   --output_dir "${OUTPUT_DIR}" \
   --verb_pth ./tmp/verb.pth \
   --eval_train_json "${MYDS_PATH}/annotations/train_20k.json" \
+  --eval_action_by_id \
   --max_hois "${EVAL_MAX_HOIS}" \
+  --eval_topk_verbs_per_query "${EVAL_TOPK_VERBS_PER_QUERY}" \
   "${NMS_ARGS[@]}" \
   "${GROUP_EVAL_ARGS[@]}" \
   "${DEBUG_ARGS[@]}" \
