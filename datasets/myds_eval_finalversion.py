@@ -2344,6 +2344,23 @@ class MyDatasetEvaluator:
 
         if self.eval_debug and _is_main_process():
             print("[EvalDebug][MyDatasetEvaluator] done accumulation, start AP summaries")
+        # Quick action-space sanity diagnostics (helps identify verb-id permutation issues).
+        if self.eval_debug and _is_main_process():
+            gt_act_set = set([self._norm_action(a) for a in self.gt_actions])
+            pred_act_hist = defaultdict(int)
+            for img_preds in self.preds:
+                for h in img_preds.get("hoi_prediction", []):
+                    pred_act_hist[self._norm_action(h.get("action"))] += 1
+            pred_act_set = set(pred_act_hist.keys())
+            overlap = len(gt_act_set & pred_act_set)
+            print(
+                f"[EvalDebug][ActionSpace] gt_unique={len(gt_act_set)} pred_unique={len(pred_act_set)} "
+                f"overlap={overlap} overlap_ratio={_safe_div(overlap, len(gt_act_set)):.4f}"
+            )
+            # print top-20 predicted action ids/tokens by frequency
+            top_pred = sorted(pred_act_hist.items(), key=lambda x: -x[1])[:20]
+            print(f"[EvalDebug][ActionSpace] top_pred_actions={top_pred}")
+
         # ---------------- Triplet Full / Rare / Non-rare ----------------
         full = self.compute_map_triplet(self.gt_triplets)
         rare_list = [t for t in self.gt_triplets if t in self.rare_triplets]
