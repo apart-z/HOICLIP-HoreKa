@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Tuple, Optional, Set
 
 import numpy as np
 import torch
+from datasets.myds_meta import load_myds_meta
 
 # Cache to avoid re-reading train.json every eval during training
 _TRAIN_FREQ_CACHE: Dict[Tuple[Any, ...], Tuple[Set[Tuple[str, str, Any]], Set[Tuple[str, str, Any]]]] = {}
@@ -806,6 +807,18 @@ class MyDatasetEvaluator:
         # Keep ID-space matching by default to avoid accidental remapping through an
         # external verb token file with different ordering.
         self.eval_action_by_id = bool(getattr(args, "eval_action_by_id", True)) if args is not None else True
+        self.num_verb_classes = int(getattr(args, "num_verb_classes", 0)) if args is not None else 0
+        self.hoi_id_to_verb_id = {}
+        if args is not None and getattr(args, "hoi_path", None):
+            try:
+                _meta = load_myds_meta(getattr(args, "hoi_path"))
+                # HOI classifier index -> base verb index
+                for hid, (v_tok, _o_tok) in _meta["id2hoi"].items():
+                    vid = _meta["verb2id"].get(str(v_tok).strip().lower(), None)
+                    if vid is not None:
+                        self.hoi_id_to_verb_id[int(hid)] = int(vid)
+            except Exception:
+                self.hoi_id_to_verb_id = {}
 
         # NMS
         self.use_nms_filter = bool(getattr(args, "use_nms_filter", False)) if args is not None else False
@@ -944,10 +957,16 @@ class MyDatasetEvaluator:
             if isinstance(a, str):
                 s = a.strip()
                 if s.isdigit():
-                    return int(s)
+                    ai = int(s)
+                    if self.num_verb_classes > 0 and ai >= self.num_verb_classes and ai in self.hoi_id_to_verb_id:
+                        return self.hoi_id_to_verb_id[ai]
+                    return ai
                 return self.normalize_action_token(s)
             try:
-                return int(a)
+                ai = int(a)
+                if self.num_verb_classes > 0 and ai >= self.num_verb_classes and ai in self.hoi_id_to_verb_id:
+                    return self.hoi_id_to_verb_id[ai]
+                return ai
             except Exception:
                 return a
 
