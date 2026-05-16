@@ -190,12 +190,21 @@ def get_args_parser():
     parser.add_argument('--eval_location', action='store_true', help='')
     parser.add_argument('--enable_group_eval', action='store_true',
                         help='enable expensive higher-order group HOI metrics during MYDS evaluation')
+    parser.add_argument('--group_member_verb_required', dest='group_member_verb_required', action='store_true',
+                        help='require verb equality for group member matching')
+    parser.add_argument('--no_group_member_verb_required', dest='group_member_verb_required', action='store_false',
+                        help='do not require verb equality for group member matching (more tolerant)')
+    parser.set_defaults(group_member_verb_required=False)
+    parser.add_argument('--group_strict_match_thresh', default=0.5, type=float,
+                        help='strict group match threshold (lower is more tolerant)')
     parser.add_argument('--eval_debug', action='store_true',
                         help='enable verbose timing/debug logs for evaluation pipeline')
     parser.add_argument('--eval_debug_dump_secs', default=120, type=int,
                         help='seconds between periodic faulthandler traceback dumps when --eval_debug is set')
     parser.add_argument('--enable_role_prior_eval', action='store_true',
                         help='enable expensive role-aware prior metrics during MYDS evaluation')
+    parser.add_argument('--enable_subset_metrics', action='store_true',
+                        help='enable expensive subset-HOI metrics during MYDS evaluation')
     parser.add_argument('--eval_train_json', default='', type=str,
                         help='train annotation json path for rare/non-rare split in MYDS evaluator')
     parser.add_argument('--max_hois', default=100, type=int,

@@ -809,9 +809,11 @@ class MyDatasetEvaluator:
         self.eval_action_by_id = bool(getattr(args, "eval_action_by_id", True)) if args is not None else True
         self.num_verb_classes = int(getattr(args, "num_verb_classes", 0)) if args is not None else 0
         self.hoi_id_to_verb_id = {}
+        self.verb_token_to_id = {}
         if args is not None and getattr(args, "hoi_path", None):
             try:
                 _meta = load_myds_meta(getattr(args, "hoi_path"))
+                self.verb_token_to_id = {str(k).strip().lower(): int(v) for k, v in _meta["verb2id"].items()}
                 # HOI classifier index -> base verb index
                 for hid, (v_tok, _o_tok) in _meta["id2hoi"].items():
                     vid = _meta["verb2id"].get(str(v_tok).strip().lower(), None)
@@ -830,6 +832,7 @@ class MyDatasetEvaluator:
         self.eval_train_json = getattr(args, "eval_train_json", None) if args is not None else None
         self.eval_debug = bool(getattr(args, "eval_debug", False)) if args is not None else False
         self.enable_role_prior_eval = bool(getattr(args, "enable_role_prior_eval", False)) if args is not None else False
+        self.enable_subset_metrics = bool(getattr(args, "enable_subset_metrics", False)) if args is not None else False
         self.rare_thresh = int(getattr(args, "eval_rare_thresh", 10)) if args is not None else 10
         self.bbox_format = getattr(args, "eval_bbox_format", "xyxy") if args is not None else "xyxy"
 
@@ -961,6 +964,9 @@ class MyDatasetEvaluator:
                     if self.num_verb_classes > 0 and ai >= self.num_verb_classes and ai in self.hoi_id_to_verb_id:
                         return self.hoi_id_to_verb_id[ai]
                     return ai
+                base = self.get_base_verb(s)
+                if base in self.verb_token_to_id:
+                    return self.verb_token_to_id[base]
                 return self.normalize_action_token(s)
             try:
                 ai = int(a)
@@ -2042,6 +2048,15 @@ class MyDatasetEvaluator:
                 pred_records.append({'image_id':img_preds['image_id'],'sbox':pann[s],'obox':pann[o],'a':self._norm_action(p['action']),
                                      'class_key':(self._norm_cat(pann[s]['category']), self._norm_cat(pann[o]['category']), self._norm_action(p['action'])),
                                      'score':float(p.get('score',0.0))})
+        # speed: cache image_id->annotations and class-key partitions once
+        imgid_to_ann = {g["image_id"]: g["annotations"] for g in self.gts}
+        gt_by_ck = defaultdict(list)
+        pred_by_ck = defaultdict(list)
+        for i, g in enumerate(gt_records):
+            gt_by_ck[g["class_key"]].append((i, g))
+        for p in pred_records:
+            pred_by_ck[p["class_key"]].append(p)
+
         out={}
         for subset in self.subset_names:
             class_keys=sorted({g['class_key'] for g in gt_records if subset in g['subsets']})
@@ -2049,22 +2064,28 @@ class MyDatasetEvaluator:
             pred_count=0
             ap_list=[]; mr_list=[]
             for ck in class_keys:
-                pos=[(i,g) for i,g in enumerate(gt_records) if g['class_key']==ck and subset in g['subsets']]
-                ign=[(i,g) for i,g in enumerate(gt_records) if g['class_key']==ck and subset not in g['subsets']]
-                preds=sorted([p for p in pred_records if p['class_key']==ck], key=lambda x:-x['score'])
+                pos=[(i,g) for i,g in gt_by_ck[ck] if subset in g['subsets']]
+                ign=[(i,g) for i,g in gt_by_ck[ck] if subset not in g['subsets']]
+                preds=sorted(pred_by_ck[ck], key=lambda x:-x['score'])
                 pred_count += len(preds)
                 if not pos: continue
+                pos_by_img = defaultdict(list)
+                ign_by_img = defaultdict(list)
+                for i, g in pos:
+                    pos_by_img[g['image_id']].append((i, g))
+                for i, g in ign:
+                    ign_by_img[g['image_id']].append((i, g))
                 used=set(); tp=[]; fp=[]; sc=[]
                 for p in preds:
-                    cand=[(i,g) for i,g in pos if g['image_id']==p['image_id'] and i not in used and self.compute_iou(self.gts[[x['image_id'] for x in self.gts].index(g['image_id'])]['annotations'][g['s']], p['sbox'])>=self.overlap_iou and self.compute_iou(self.gts[[x['image_id'] for x in self.gts].index(g['image_id'])]['annotations'][g['o']], p['obox'])>=self.overlap_iou]
+                    pos_img = pos_by_img.get(p['image_id'], [])
+                    cand=[(i,g) for i,g in pos_img if i not in used and self.compute_iou(imgid_to_ann[g['image_id']][g['s']], p['sbox'])>=self.overlap_iou and self.compute_iou(imgid_to_ann[g['image_id']][g['o']], p['obox'])>=self.overlap_iou]
                     if cand:
                         used.add(cand[0][0]); tp.append(1); fp.append(0); sc.append(p['score']); continue
-                    dup=[(i,g) for i,g in pos if g['image_id']==p['image_id'] and self.compute_iou(self.gts[[x['image_id'] for x in self.gts].index(g['image_id'])]['annotations'][g['s']], p['sbox'])>=self.overlap_iou and self.compute_iou(self.gts[[x['image_id'] for x in self.gts].index(g['image_id'])]['annotations'][g['o']], p['obox'])>=self.overlap_iou]
+                    dup=[(i,g) for i,g in pos_img if self.compute_iou(imgid_to_ann[g['image_id']][g['s']], p['sbox'])>=self.overlap_iou and self.compute_iou(imgid_to_ann[g['image_id']][g['o']], p['obox'])>=self.overlap_iou]
                     if dup: tp.append(0); fp.append(1); sc.append(p['score']); continue
                     ignm=False
-                    for _,g in ign:
-                        if g['image_id']!=p['image_id']: continue
-                        ann2=self.gts[[x['image_id'] for x in self.gts].index(g['image_id'])]['annotations']
+                    for _,g in ign_by_img.get(p['image_id'], []):
+                        ann2=imgid_to_ann[g['image_id']]
                         if self.compute_iou(ann2[g['s']],p['sbox'])>=self.overlap_iou and self.compute_iou(ann2[g['o']],p['obox'])>=self.overlap_iou:
                             ignm=True; break
                     if ignm: continue
@@ -2401,8 +2422,37 @@ class MyDatasetEvaluator:
             print(f"Triplet Rare     mAP: {rare['mAP']:.4f}  mean max recall: {rare['mean max recall']:.4f}")
             print(f"Triplet Non-Rare mAP: {nonrare['mAP']:.4f}  mean max recall: {nonrare['mean max recall']:.4f}")
 
+        # normalize action space for group evaluator as well (verb-id aligned).
+        group_preds = []
+        for p in self.preds:
+            pp = dict(p)
+            hp = []
+            for h in p.get("hoi_prediction", []):
+                hh = dict(h)
+                hh["action"] = self._norm_action(hh.get("action"))
+                hp.append(hh)
+            pp["hoi_prediction"] = hp
+            if "hoi_prediction_for_group" in p:
+                hpg = []
+                for h in p.get("hoi_prediction_for_group", []):
+                    hh = dict(h)
+                    hh["action"] = self._norm_action(hh.get("action"))
+                    hpg.append(hh)
+                pp["hoi_prediction_for_group"] = hpg
+            group_preds.append(pp)
+        group_gts = []
+        for g in self.gts:
+            gg = dict(g)
+            gha = []
+            for h in g.get("hoi_annotation", []):
+                hh = dict(h)
+                hh["action"] = self._norm_action(hh.get("action"))
+                gha.append(hh)
+            gg["hoi_annotation"] = gha
+            group_gts.append(gg)
+
         t_group = time.time()
-        group_out = self.group_evaluator.evaluate(self.preds, self.gts)
+        group_out = self.group_evaluator.evaluate(group_preds, group_gts)
         if self.eval_debug and _is_main_process():
             print(f"[EvalDebug][MyDatasetEvaluator] group_evaluator.evaluate() took {time.time()-t_group:.3f}s")
         if _is_main_process() and (not isinstance(group_out, dict) or len(group_out) == 0):
@@ -2419,7 +2469,10 @@ class MyDatasetEvaluator:
                 print(f"Group counts: total_gt_groups={gt_cnt}  total_pred_groups={pd_cnt}")
             print("--------------------------------------------------")
 
-        subset_out = self._compute_subset_metrics()
+        subset_out = self._compute_subset_metrics() if self.enable_subset_metrics else {
+            k: {'mAP': -1.0, 'mean max recall': -1.0, 'gt_count': 0, 'pred_count': 0, 'valid_classes': 0}
+            for k in self.subset_names
+        }
         if _is_main_process():
             print("[SubsetHOIMetrics]")
             name_map = {

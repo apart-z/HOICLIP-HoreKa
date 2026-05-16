@@ -34,10 +34,11 @@ if [[ -z "${MASTER_PORT:-}" ]]; then
     MASTER_PORT="29531"
   fi
 fi
-ENABLE_GROUP_EVAL="${ENABLE_GROUP_EVAL:-0}"
+ENABLE_GROUP_EVAL="${ENABLE_GROUP_EVAL:-1}"
 EVAL_DEBUG="${EVAL_DEBUG:-0}"
 EVAL_DEBUG_DUMP_SECS="${EVAL_DEBUG_DUMP_SECS:-120}"
 ENABLE_ROLE_PRIOR_EVAL="${ENABLE_ROLE_PRIOR_EVAL:-0}"
+ENABLE_SUBSET_METRICS="${ENABLE_SUBSET_METRICS:-1}"
 USE_NMS_FILTER="${USE_NMS_FILTER:-0}"
 EVAL_MAX_HOIS="${EVAL_MAX_HOIS:-1000}"
 EVAL_TOPK_VERBS_PER_QUERY="${EVAL_TOPK_VERBS_PER_QUERY:-20}"
@@ -78,7 +79,7 @@ echo "[INFO] Distributed launch config: NNODES=${NNODES} NPROC_PER_NODE=${NPROC_
 
 GROUP_EVAL_ARGS=()
 if [[ "${ENABLE_GROUP_EVAL}" == "1" ]]; then
-  GROUP_EVAL_ARGS+=(--enable_group_eval)
+  GROUP_EVAL_ARGS+=(--enable_group_eval --no_group_member_verb_required --group_strict_match_thresh 0.5)
 fi
 DEBUG_ARGS=()
 if [[ "${EVAL_DEBUG}" == "1" ]]; then
@@ -91,6 +92,9 @@ if [[ "${USE_NMS_FILTER}" == "1" ]]; then
 fi
 if [[ "${ENABLE_ROLE_PRIOR_EVAL}" == "1" ]]; then
   DEBUG_ARGS+=(--enable_role_prior_eval)
+fi
+if [[ "${ENABLE_SUBSET_METRICS}" == "1" ]]; then
+  DEBUG_ARGS+=(--enable_subset_metrics)
 fi
 
 LAUNCHER=(python main.py)
