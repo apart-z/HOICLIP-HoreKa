@@ -21,6 +21,7 @@ This file is intended to be imported and used during RLIPv2 training/eval.
 import os
 import json
 import math
+import time
 from collections import defaultdict
 from typing import Any, Dict, List, Tuple, Optional, Set
 
@@ -123,9 +124,9 @@ class GroupHOIMetrics:
     def __init__(self, args, overlap_iou: float, norm_cat_fn):
         self.overlap_iou = overlap_iou
         self._norm_cat = norm_cat_fn
-        # Default-on for custom HOI eval to avoid silent all-zero group metrics
-        # when flag is forgotten in training scripts.
-        self.enabled = bool(getattr(args, "enable_group_eval", True)) if args is not None else True
+        # Group metrics are significantly more expensive than triplet/pair/action mAP.
+        # Keep disabled by default unless explicitly requested.
+        self.enabled = bool(getattr(args, "enable_group_eval", False)) if args is not None else False
         self.soft_match_thresh = float(getattr(args, "group_soft_match_thresh", 0.5)) if args is not None else 0.5
         self.duplicate_iou = float(getattr(args, "group_duplicate_iou", 0.85)) if args is not None else 0.85
         self.group_build_mode = str(getattr(args, "group_build_mode", "heuristic_graph")) if args is not None else "heuristic_graph"
@@ -783,6 +784,7 @@ class MyDatasetEvaluator:
     """
 
     def __init__(self, preds, gts, subject_category_id=None, args=None):
+        t0_ctor = time.time()
         # ---------------- Basic config ----------------
         self.overlap_iou = float(getattr(args, "iou_thresh", 0.5)) if args is not None else 0.5
         self.subject_category_id = subject_category_id
@@ -798,6 +800,12 @@ class MyDatasetEvaluator:
         self.object_id_to_category = obj_tokens
         self.max_hois = int(getattr(args, "max_hois", 100)) if args is not None else 100
         self.group_max_hois = int(getattr(args, "group_max_hois", 2000)) if args is not None else 2000
+        self.eval_topk_verbs_per_query = int(getattr(args, "eval_topk_verbs_per_query", 20)) if args is not None else 20
+        # IMPORTANT:
+        # For MYDS val/test built by datasets_gen/myds.py, actions are integer verb IDs.
+        # Keep ID-space matching by default to avoid accidental remapping through an
+        # external verb token file with different ordering.
+        self.eval_action_by_id = bool(getattr(args, "eval_action_by_id", True)) if args is not None else True
 
         # NMS
         self.use_nms_filter = bool(getattr(args, "use_nms_filter", False)) if args is not None else False
@@ -807,6 +815,8 @@ class MyDatasetEvaluator:
 
         # Rare/non-rare split params (triplet-level, computed from TRAIN frequency)
         self.eval_train_json = getattr(args, "eval_train_json", None) if args is not None else None
+        self.eval_debug = bool(getattr(args, "eval_debug", False)) if args is not None else False
+        self.enable_role_prior_eval = bool(getattr(args, "enable_role_prior_eval", False)) if args is not None else False
         self.rare_thresh = int(getattr(args, "eval_rare_thresh", 10)) if args is not None else 10
         self.bbox_format = getattr(args, "eval_bbox_format", "xyxy") if args is not None else "xyxy"
 
@@ -864,13 +874,21 @@ class MyDatasetEvaluator:
 
         # Build internal structures from raw preds & gts
         self._build_from_preds_gts(preds, gts)
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator::__init__] _build_from_preds_gts took {time.time() - t0_ctor:.3f}s")
 
         # Optional: triplet NMS per image
         if self.use_nms_filter:
+            t_nms = time.time()
             self.preds = [self.triplet_nms_filter_single(p) for p in self.preds]
+            if self.eval_debug and _is_main_process():
+                print(f"[EvalDebug][MyDatasetEvaluator::__init__] triplet_nms_filter_single(all images) took {time.time() - t_nms:.3f}s")
 
         # Build rare/non-rare sets (projected to eval triplets)
+        t_rare = time.time()
         self.rare_triplets, self.nonrare_triplets = self._build_rare_nonrare_sets(eval_gts_raw=gts)
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator::__init__] _build_rare_nonrare_sets took {time.time() - t_rare:.3f}s")
 
         total_gts = sum(self.sum_gts.values())
         if _is_main_process():
@@ -882,6 +900,8 @@ class MyDatasetEvaluator:
                 f"rare_triplets={len(self.rare_triplets)}, nonrare_triplets={len(self.nonrare_triplets)}, "
                 f"max_hois={self.max_hois}, group_max_hois={self.group_max_hois}"
             )
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator::__init__] total ctor time {time.time() - t0_ctor:.3f}s")
 
     # ------------------------------------------------------------------
     # Normalizers / helpers
@@ -920,6 +940,17 @@ class MyDatasetEvaluator:
             return str(cat).strip()
 
     def _norm_action(self, a: Any) -> Any:
+        if self.eval_action_by_id:
+            if isinstance(a, str):
+                s = a.strip()
+                if s.isdigit():
+                    return int(s)
+                return self.normalize_action_token(s)
+            try:
+                return int(a)
+            except Exception:
+                return a
+
         if isinstance(a, str):
             s = a.strip()
             if s.isdigit():
@@ -1008,18 +1039,38 @@ class MyDatasetEvaluator:
                 pred_bboxes.append({"bbox": _as_xyxy(box, self.bbox_format), "category": _label_to_int(lbl)})
 
             num_queries, num_verbs = verb_scores.shape
-            verb_ids = np.tile(np.arange(num_verbs, dtype=np.int32), (num_queries, 1)).ravel()
-            subj_ids = np.tile(sub_ids.reshape(-1, 1), (1, num_verbs)).ravel()
-            obj_ids2 = np.tile(obj_ids.reshape(-1, 1), (1, num_verbs)).ravel()
-            scores_flat = verb_scores.ravel()
+            keep_k = max(
+                int(self.max_hois) if self.max_hois > 0 else 0,
+                int(self.group_max_hois) if self.group_max_hois > 0 else 0
+            )
 
-            pred_hois = []
-            for s_id, o_id, v_id, sc in zip(subj_ids, obj_ids2, verb_ids, scores_flat):
-                pred_hois.append(
-                    {"subject_id": int(s_id), "object_id": int(o_id), "action": int(v_id), "score": float(sc)}
-                )
+            # Fast path: per-query top-k verbs first, then global top-k over reduced pool.
+            kq = max(1, min(int(self.eval_topk_verbs_per_query), num_verbs))
+            if kq < num_verbs:
+                local_part = np.argpartition(verb_scores, -kq, axis=1)[:, -kq:]  # [Q, kq]
+            else:
+                local_part = np.tile(np.arange(num_verbs, dtype=np.int32), (num_queries, 1))
 
-            pred_hois.sort(key=lambda k: float(k.get("score", 0.0)), reverse=True)
+            q_ids = np.repeat(np.arange(num_queries, dtype=np.int32), local_part.shape[1])
+            v_ids = local_part.reshape(-1).astype(np.int32, copy=False)
+            cand_scores = verb_scores[q_ids, v_ids].astype(np.float32, copy=False)
+
+            if keep_k <= 0 or keep_k >= cand_scores.size:
+                order = np.argsort(cand_scores)[::-1]
+            else:
+                part = np.argpartition(cand_scores, -keep_k)[-keep_k:]
+                order = part[np.argsort(cand_scores[part])[::-1]]
+
+            pred_hois = [
+                {
+                    "subject_id": int(sub_ids[q_ids[i]]),
+                    "object_id": int(obj_ids[q_ids[i]]),
+                    "action": int(v_ids[i]),
+                    "score": float(cand_scores[i]),
+                }
+                for i in order
+            ]
+
             pred_hois_for_group = pred_hois[: self.group_max_hois] if self.group_max_hois > 0 else pred_hois
             pred_hois_for_hoi = pred_hois[: self.max_hois] if self.max_hois > 0 else pred_hois
 
@@ -2207,8 +2258,11 @@ class MyDatasetEvaluator:
     # ------------------------------------------------------------------
 
     def evaluate(self) -> Dict[str, float]:
+        t_eval_all = time.time()
         self._print_non_contact_debug_summary()
         self._print_non_contact_debug_samples()
+        if self.eval_debug and _is_main_process():
+            print("[EvalDebug][MyDatasetEvaluator] start image-wise TP/FP accumulation")
         # accumulate TP/FP for every image
         for img_preds, img_gts in zip(self.preds, self.gts):
             pred_bboxes = img_preds["predictions"]
@@ -2288,6 +2342,8 @@ class MyDatasetEvaluator:
                 # - If no GT, we do not count FP for unseen keys beyond eval space.
                 # - If no preds, nothing to accumulate.
 
+        if self.eval_debug and _is_main_process():
+            print("[EvalDebug][MyDatasetEvaluator] done accumulation, start AP summaries")
         # ---------------- Triplet Full / Rare / Non-rare ----------------
         full = self.compute_map_triplet(self.gt_triplets)
         rare_list = [t for t in self.gt_triplets if t in self.rare_triplets]
@@ -2309,7 +2365,10 @@ class MyDatasetEvaluator:
             print(f"Triplet Rare     mAP: {rare['mAP']:.4f}  mean max recall: {rare['mean max recall']:.4f}")
             print(f"Triplet Non-Rare mAP: {nonrare['mAP']:.4f}  mean max recall: {nonrare['mean max recall']:.4f}")
 
+        t_group = time.time()
         group_out = self.group_evaluator.evaluate(self.preds, self.gts)
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator] group_evaluator.evaluate() took {time.time()-t_group:.3f}s")
         if _is_main_process() and (not isinstance(group_out, dict) or len(group_out) == 0):
             print("[MyDatasetEvaluator] Group evaluator returned empty output (likely disabled). "
                   "Set --enable_group_eval to force group metric computation.")
@@ -2348,7 +2407,18 @@ class MyDatasetEvaluator:
             "triplet_rare_mAP": rare['mAP'], "triplet_rare_mean max recall": rare['mean max recall'],
             "triplet_non_rare_mAP": nonrare['mAP'], "triplet_non_rare_mean max recall": nonrare['mean max recall'],
         }
-        role_stats = self._compute_role_metrics_prior()
+        if self.enable_role_prior_eval:
+            t_role = time.time()
+            role_stats = self._compute_role_metrics_prior()
+            if self.eval_debug and _is_main_process():
+                print(f"[EvalDebug][MyDatasetEvaluator] _compute_role_metrics_prior() took {time.time()-t_role:.3f}s")
+        else:
+            role_stats = {
+                'role_mAP_vro_prior': 0.0, 'role_AP_target_prior': 0.0, 'role_AP_instrument_prior': 0.0,
+                'role_AP_support_prior': 0.0, 'role_AP_location_prior': 0.0, 'role_HRER_prior': 0.0,
+                'role_NIC_FPR': 0.0, 'role_GT_target': 0.0, 'role_GT_instrument': 0.0,
+                'role_GT_support': 0.0, 'role_GT_location': 0.0, 'role_RB_mAP_prior': 0.0
+            }
         stats.update(role_stats)
         if _is_main_process():
             print("[RoleAwarePriorMetrics]")
@@ -2366,6 +2436,8 @@ class MyDatasetEvaluator:
                 f"role_HRER_prior: {role_stats.get('role_HRER_prior', 0.0):.4f}  "
                 f"role_NIC_FPR: {role_stats.get('role_NIC_FPR', 0.0):.4f}"
             )
+        if self.eval_debug and _is_main_process():
+            print(f"[EvalDebug][MyDatasetEvaluator] total evaluate() time {time.time()-t_eval_all:.3f}s")
             print(
                 f"role_GT_target: {int(role_stats.get('role_GT_target', 0.0))}  "
                 f"role_GT_instrument: {int(role_stats.get('role_GT_instrument', 0.0))}  "
