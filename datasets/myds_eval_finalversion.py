@@ -810,10 +810,12 @@ class MyDatasetEvaluator:
         self.num_verb_classes = int(getattr(args, "num_verb_classes", 0)) if args is not None else 0
         self.hoi_id_to_verb_id = {}
         self.verb_token_to_id = {}
+        self.verb_id_to_base = {}
         if args is not None and getattr(args, "hoi_path", None):
             try:
                 _meta = load_myds_meta(getattr(args, "hoi_path"))
                 self.verb_token_to_id = {str(k).strip().lower(): int(v) for k, v in _meta["verb2id"].items()}
+                self.verb_id_to_base = {int(i): str(v).strip().lower() for i, v in _meta["id2verb"].items()}
                 # HOI classifier index -> base verb index
                 for hid, (v_tok, _o_tok) in _meta["id2hoi"].items():
                     vid = _meta["verb2id"].get(str(v_tok).strip().lower(), None)
@@ -821,6 +823,17 @@ class MyDatasetEvaluator:
                         self.hoi_id_to_verb_id[int(hid)] = int(vid)
             except Exception:
                 self.hoi_id_to_verb_id = {}
+                self.verb_id_to_base = {}
+
+    def _action_to_base_verb(self, a: Any) -> str:
+        """Return base verb token in MYDS verb vocabulary space."""
+        na = self._norm_action(a)
+        if isinstance(na, (int, np.integer)):
+            vid = int(na)
+            if vid in self.verb_id_to_base:
+                return self.verb_id_to_base[vid]
+            return str(vid)
+        return self.get_base_verb(na)
 
         # NMS
         self.use_nms_filter = bool(getattr(args, "use_nms_filter", False)) if args is not None else False
@@ -2186,7 +2199,13 @@ class MyDatasetEvaluator:
                 ocat = self._norm_cat(obj.get('category')) if isinstance(obj, dict) else self._norm_cat('')
                 for tk in toks:
                     if tk is None: continue
-                    v,r = parse_action_token(tk)
+                    # support both token actions ("verb:role") and numeric ids
+                    if isinstance(tk, (int, np.integer)) or (isinstance(tk, str) and str(tk).strip().isdigit()):
+                        v = self._action_to_base_verb(tk)
+                        r = "target"
+                    else:
+                        v, r = parse_action_token(tk)
+                        v = str(v).strip().lower()
                     if r not in role_set: continue
                     c_vro[(v,r,ocat)] += 1; c_vo[(v,ocat)] += 1; c_vr[(v,r)] += 1; c_v[v] += 1
 
@@ -2218,7 +2237,7 @@ class MyDatasetEvaluator:
             for p in ph:
                 s,o = int(p['subject_id']), int(p['object_id'])
                 if s>=len(pb) or o>=len(pb): continue
-                v = self.get_base_verb(self._norm_action(p['action']))
+                v = self._action_to_base_verb(p['action'])
                 oc = self._norm_cat(pb[o]['category']); sc=float(p.get('score',0.0))
                 den = c_vo.get((v,oc),0)
                 probs = {}
