@@ -825,16 +825,6 @@ class MyDatasetEvaluator:
                 self.hoi_id_to_verb_id = {}
                 self.verb_id_to_base = {}
 
-    def _action_to_base_verb(self, a: Any) -> str:
-        """Return base verb token in MYDS verb vocabulary space."""
-        na = self._norm_action(a)
-        if isinstance(na, (int, np.integer)):
-            vid = int(na)
-            if vid in self.verb_id_to_base:
-                return self.verb_id_to_base[vid]
-            return str(vid)
-        return self.get_base_verb(na)
-
         # NMS
         self.use_nms_filter = bool(getattr(args, "use_nms_filter", False)) if args is not None else False
         self.thres_nms = float(getattr(args, "thres_nms", 0.7)) if args is not None else 0.7
@@ -931,6 +921,16 @@ class MyDatasetEvaluator:
             )
         if self.eval_debug and _is_main_process():
             print(f"[EvalDebug][MyDatasetEvaluator::__init__] total ctor time {time.time() - t0_ctor:.3f}s")
+
+    def _action_to_base_verb(self, a: Any) -> str:
+        """Return base verb token in MYDS verb vocabulary space."""
+        na = self._norm_action(a)
+        if isinstance(na, (int, np.integer)):
+            vid = int(na)
+            if vid in self.verb_id_to_base:
+                return self.verb_id_to_base[vid]
+            return str(vid)
+        return self.get_base_verb(na)
 
     # ------------------------------------------------------------------
     # Normalizers / helpers
