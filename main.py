@@ -3,6 +3,7 @@ import datetime
 import json
 import random
 import time
+import faulthandler
 from pathlib import Path
 import logging
 
@@ -138,6 +139,8 @@ def get_args_parser():
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--eval_split', default='both', choices=['both', 'test', 'val'],
+                        help='evaluation split when --eval is set')
     parser.add_argument('--num_workers', default=2, type=int)
 
     # distributed training parameters
@@ -185,6 +188,22 @@ def get_args_parser():
     parser.add_argument('--dataset_root', default='GEN', help='')
     parser.add_argument('--model_name', default='GEN', help='')
     parser.add_argument('--eval_location', action='store_true', help='')
+    parser.add_argument('--enable_group_eval', action='store_true',
+                        help='enable expensive higher-order group HOI metrics during MYDS evaluation')
+    parser.add_argument('--eval_debug', action='store_true',
+                        help='enable verbose timing/debug logs for evaluation pipeline')
+    parser.add_argument('--eval_debug_dump_secs', default=120, type=int,
+                        help='seconds between periodic faulthandler traceback dumps when --eval_debug is set')
+    parser.add_argument('--enable_role_prior_eval', action='store_true',
+                        help='enable expensive role-aware prior metrics during MYDS evaluation')
+    parser.add_argument('--eval_train_json', default='', type=str,
+                        help='train annotation json path for rare/non-rare split in MYDS evaluator')
+    parser.add_argument('--max_hois', default=100, type=int,
+                        help='max predicted HOI pairs kept per image for MYDS evaluator')
+    parser.add_argument('--group_max_hois', default=2000, type=int,
+                        help='max predicted HOIs used for group evaluator construction')
+    parser.add_argument('--iou_thresh', default=0.5, type=float,
+                        help='IoU threshold used in MYDS evaluator matching')
     # DAB
     parser.add_argument('--enable_cp', action='store_true',
                         help="use checkpoint to save memory")
@@ -219,6 +238,10 @@ def get_args_parser():
 
 
 def main(args):
+    if getattr(args, "eval_debug", False):
+        # Periodically dump Python stack traces to help locate hangs/stalls.
+        faulthandler.enable()
+        faulthandler.dump_traceback_later(max(30, int(getattr(args, "eval_debug_dump_secs", 120))), repeat=True)
     if args.use_ddp == 1:
         utils.init_distributed_mode(args)
     else:
@@ -378,7 +401,7 @@ def main(args):
 
     # test and val dataloader initialization
 
-    test_split = 'val'
+    test_split = 'test'
     dataset_val = build_dataset(image_set='val', args=args)
     dataset_test = build_dataset(image_set=test_split, args=args)
     if args.distributed:
@@ -453,7 +476,10 @@ def main(args):
         with open(output_dir / "log.txt", 'r') as f:
             previous_log = f.read()
 
-        if 'Test result:' not in previous_log:
+        run_test = args.eval_split in ('both', 'test')
+        run_val = args.eval_split in ('both', 'val')
+
+        if run_test and 'Test result:' not in previous_log:
             print('Evaluating in test split!')
             test_stats = evaluate_hoi(args.dataset_file, model, postprocessors, data_loader_test,
                                       args.subject_category_id, device, args)
@@ -464,7 +490,7 @@ def main(args):
                     f.write('Test result:' + json.dumps(test_stats) + "\n")
                 LOGGER.info('Epoch Test: [{}] '.format('eval') + json.dumps(test_stats))
 
-        if 'Val result:' not in previous_log:
+        if run_val and 'Val result:' not in previous_log:
             print('Evaluating in val split!')
             test_stats = evaluate_hoi(args.dataset_file, model, postprocessors, data_loader_val,
                                       args.subject_category_id, device, args)
