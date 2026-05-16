@@ -196,6 +196,14 @@ def get_args_parser():
                         help='seconds between periodic faulthandler traceback dumps when --eval_debug is set')
     parser.add_argument('--enable_role_prior_eval', action='store_true',
                         help='enable expensive role-aware prior metrics during MYDS evaluation')
+    parser.add_argument('--eval_train_json', default='', type=str,
+                        help='train annotation json path for rare/non-rare split in MYDS evaluator')
+    parser.add_argument('--max_hois', default=100, type=int,
+                        help='max predicted HOI pairs kept per image for MYDS evaluator')
+    parser.add_argument('--group_max_hois', default=2000, type=int,
+                        help='max predicted HOIs used for group evaluator construction')
+    parser.add_argument('--iou_thresh', default=0.5, type=float,
+                        help='IoU threshold used in MYDS evaluator matching')
     # DAB
     parser.add_argument('--enable_cp', action='store_true',
                         help="use checkpoint to save memory")

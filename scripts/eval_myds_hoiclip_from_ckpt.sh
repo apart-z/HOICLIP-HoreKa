@@ -38,6 +38,8 @@ ENABLE_GROUP_EVAL="${ENABLE_GROUP_EVAL:-0}"
 EVAL_DEBUG="${EVAL_DEBUG:-0}"
 EVAL_DEBUG_DUMP_SECS="${EVAL_DEBUG_DUMP_SECS:-120}"
 ENABLE_ROLE_PRIOR_EVAL="${ENABLE_ROLE_PRIOR_EVAL:-0}"
+USE_NMS_FILTER="${USE_NMS_FILTER:-0}"
+EVAL_MAX_HOIS="${EVAL_MAX_HOIS:-1000}"
 
 source "${CONDA_BASE}/etc/profile.d/conda.sh"
 # Conda activate scripts may reference unset vars (e.g. MKL_INTERFACE_LAYER),
@@ -81,6 +83,11 @@ DEBUG_ARGS=()
 if [[ "${EVAL_DEBUG}" == "1" ]]; then
   DEBUG_ARGS+=(--eval_debug --eval_debug_dump_secs "${EVAL_DEBUG_DUMP_SECS}")
 fi
+
+NMS_ARGS=()
+if [[ "${USE_NMS_FILTER}" == "1" ]]; then
+  NMS_ARGS+=(--use_nms_filter)
+fi
 if [[ "${ENABLE_ROLE_PRIOR_EVAL}" == "1" ]]; then
   DEBUG_ARGS+=(--enable_role_prior_eval)
 fi
@@ -117,7 +124,6 @@ fi
   --dataset_root GEN \
   --model_name HOICLIP \
   --zero_shot_type default \
-  --use_nms_filter \
   --fix_clip \
   --with_clip_label \
   --with_obj_clip_label \
@@ -125,6 +131,9 @@ fi
   --resume "${CKPT_PATH}" \
   --output_dir "${OUTPUT_DIR}" \
   --verb_pth ./tmp/verb.pth \
+  --eval_train_json "${MYDS_PATH}/annotations/train_20k.json" \
+  --max_hois "${EVAL_MAX_HOIS}" \
+  "${NMS_ARGS[@]}" \
   "${GROUP_EVAL_ARGS[@]}" \
   "${DEBUG_ARGS[@]}" \
   2>&1 | tee "${OUTPUT_DIR}/eval.log"

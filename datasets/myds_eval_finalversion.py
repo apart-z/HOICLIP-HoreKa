@@ -1025,15 +1025,30 @@ class MyDatasetEvaluator:
             verb_ids = np.tile(np.arange(num_verbs, dtype=np.int32), (num_queries, 1)).ravel()
             subj_ids = np.tile(sub_ids.reshape(-1, 1), (1, num_verbs)).ravel()
             obj_ids2 = np.tile(obj_ids.reshape(-1, 1), (1, num_verbs)).ravel()
-            scores_flat = verb_scores.ravel()
+            scores_flat = verb_scores.ravel().astype(np.float32, copy=False)
 
-            pred_hois = []
-            for s_id, o_id, v_id, sc in zip(subj_ids, obj_ids2, verb_ids, scores_flat):
-                pred_hois.append(
-                    {"subject_id": int(s_id), "object_id": int(o_id), "action": int(v_id), "score": float(sc)}
-                )
+            # IMPORTANT for speed:
+            # avoid building/sorting full Q*V hypotheses for every image.
+            keep_k = max(
+                int(self.max_hois) if self.max_hois > 0 else 0,
+                int(self.group_max_hois) if self.group_max_hois > 0 else 0
+            )
+            if keep_k <= 0 or keep_k >= scores_flat.size:
+                top_idx = np.argsort(scores_flat)[::-1]
+            else:
+                part = np.argpartition(scores_flat, -keep_k)[-keep_k:]
+                top_idx = part[np.argsort(scores_flat[part])[::-1]]
 
-            pred_hois.sort(key=lambda k: float(k.get("score", 0.0)), reverse=True)
+            pred_hois = [
+                {
+                    "subject_id": int(subj_ids[i]),
+                    "object_id": int(obj_ids2[i]),
+                    "action": int(verb_ids[i]),
+                    "score": float(scores_flat[i]),
+                }
+                for i in top_idx
+            ]
+
             pred_hois_for_group = pred_hois[: self.group_max_hois] if self.group_max_hois > 0 else pred_hois
             pred_hois_for_hoi = pred_hois[: self.max_hois] if self.max_hois > 0 else pred_hois
 
